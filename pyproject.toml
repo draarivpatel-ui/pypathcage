@@ -30,8 +30,9 @@ dependencies = []
 dev = []
 
 [project.urls]
-Homepage = "https://github.com/pypathcage/pypathcage"
-Issues = "https://github.com/pypathcage/pypathcage/issues"
+Homepage = "https://github.com/draarivpatel-ui/pypathcage"
+Repository = "https://github.com/draarivpatel-ui/pypathcage"
+Issues = "https://github.com/draarivpatel-ui/pypathcage/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
