@@ -22,6 +22,8 @@ Real attacks are not just `../`. They include:
 - Prefix confusion (`/tmp/cage-evil` next to `/tmp/cage`)
 - Symlinks in an existing ancestor of a path that does not exist yet
 - Archive members that are symlinks or hardlinks pointing outside the destination
+- ZIP members marked as Unix symlinks, which a naive extractor turns into real links
+- Encrypted archive members that cannot be inspected or extracted
 - TAR device and FIFO entries
 - Compression bombs that lie about their uncompressed size
 
@@ -87,6 +89,8 @@ safe_extract_zip(upload, destination)
 
 Both extractors accept a path, a file object, or an already-open `ZipFile` / `TarFile`. They also accept an `ArchiveLimits` object:
 
+ZIP symlink entries (Unix mode `0o120000` in the external attributes) and encrypted ZIP members are rejected instead of being silently turned into regular files, because the extractor never calls `ZipFile.extract`. TAR link members are rejected by default and can be enabled explicitly with `ArchiveLimits(no_symlinks=False, allow_links=True)`, which still checks every target for containment.
+
 ```python
 from pypathcage import ArchiveLimits, safe_extract_zip
 
@@ -132,7 +136,7 @@ Every failure raises `PathCageError`, a `ValueError` subclass with a typed `.cod
 3. File count, per-file bytes, total uncompressed bytes and compression ratio are enforced on real extracted bytes, not just headers.
 4. Lexically hostile names are rejected consistently on every platform.
 
-It does not scan for malware, decrypt archives or provide an antivirus boundary. Links are rejected by default; callers who opt in must accept the documented containment checks.
+It does not scan for malware, decrypt archives or provide an antivirus boundary. Links are rejected by default; callers who opt in must accept the documented containment checks. ZIP symlink and encrypted members are always rejected. `inspect_*` reports header-derived sizes, so use extraction when the limits must be enforced against the bytes actually written.
 
 ## Development
 
@@ -140,7 +144,7 @@ It does not scan for malware, decrypt archives or provide an antivirus boundary.
 PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
-The suite contains 196 deterministic tests that build real hostile ZIP and TAR archives in temporary directories and clean them up automatically.
+The suite contains 246 deterministic tests that build real hostile ZIP and TAR archives in temporary directories and clean them up automatically.
 
 ## License
 

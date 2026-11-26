@@ -32,4 +32,4 @@ Do not publish the advisory until a fix is available. Reports are acknowledged w
 
 ## Hardening notes
 
-Extraction is safe only when the destination root itself is trusted. Do not extract into a directory that an attacker can modify concurrently. The library rejects links by default; enabling `allow_links` requires `no_symlinks=False` and still checks containment of every link target.
+Extraction is safe only when the destination root itself is trusted. Do not extract into a directory that an attacker can modify concurrently. The library rejects TAR links by default; enabling `allow_links` requires `no_symlinks=False` and still checks containment of every link target. ZIP members marked as Unix symlinks and encrypted members are always rejected.

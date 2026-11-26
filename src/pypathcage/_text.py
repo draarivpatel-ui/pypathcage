@@ -7,6 +7,7 @@ be applied uniformly to user supplied paths and to archive member names.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Iterable, Tuple
 
 from .errors import ErrorCode, PathCageError
@@ -51,14 +52,37 @@ _DEVICE_PREFIX_RE = re.compile(r"^[\\/]{2}[?.]")
 
 
 def normalize_confusables(text: str) -> Tuple[str, bool]:
-    """Return ``(normalized, changed)`` with high risk look alikes folded.
+    """Return ``(normalized, changed)`` with the table look alikes folded.
 
-    Unicode normalization is intentionally limited to NFKC for the confusable
-    scan; we do not silently accept the folded text, we only use it to decide
-    whether the original contained a character that must be rejected.
+    This is only the small high confidence table above, not a general NFKC
+    fold.  ``check_lexical`` and ``check_windows_lexical`` separately use
+    NFKC to catch characters that only become dangerous after normalization.
     """
     folded = "".join(_CONFUSABLES.get(ch, ch) for ch in text)
     return folded, folded != text
+
+
+def folds_to_path_syntax(char: str) -> bool:
+    """True when NFKC would turn ``char`` into a path separator or colon.
+
+    Attackers use compatibility characters such as SMALL REVERSE SOLIDUS
+    (U+FE68, folds to a backslash) or SMALL COLON (U+FE55) to smuggle path
+    syntax past a table of fullwidth look alikes.  Any consumer that later
+    NFKC normalizes the name would see a real separator, so reject the
+    character here.
+    """
+    if len(char) != 1 or ord(char) < 0x80:
+        return False
+    folded = unicodedata.normalize("NFKC", char)
+    if folded == char:
+        return False
+    return "/" in folded or "\\" in folded or ":" in folded
+
+
+def folds_to_reserved_name(component: str) -> bool:
+    """True when NFKC turns ``component`` into a Windows reserved device name."""
+    folded = unicodedata.normalize("NFKC", component)
+    return folded != component and is_windows_reserved(folded)
 
 
 def check_lexical(value: str, *, allow_nul: bool = False) -> str:
@@ -81,6 +105,8 @@ def check_lexical(value: str, *, allow_nul: bool = False) -> str:
         elif _CONTROL_RE.match(ch):
             raise PathCageError(ErrorCode.CONTROL_CHARACTER, "path contains a control character")
         elif ch in _CONFUSABLES:
+            raise PathCageError(ErrorCode.UNICODE_CONFUSABLE, "path contains a Unicode look alike", hex(ord(ch)))
+        elif folds_to_path_syntax(ch):
             raise PathCageError(ErrorCode.UNICODE_CONFUSABLE, "path contains a Unicode look alike", hex(ord(ch)))
     return value
 
@@ -120,6 +146,12 @@ def check_windows_lexical(value: str) -> None:
             raise PathCageError(ErrorCode.WINDOWS_ADS, "Windows alternate data stream is not allowed", part)
         if is_windows_reserved(part):
             raise PathCageError(ErrorCode.WINDOWS_RESERVED_NAME, "Windows reserved device name is not allowed", part)
+        if folds_to_reserved_name(part):
+            raise PathCageError(
+                ErrorCode.UNICODE_CONFUSABLE,
+                "Windows reserved device name look alike is not allowed",
+                part,
+            )
         if part != part.rstrip(" ."):
             raise PathCageError(
                 ErrorCode.WINDOWS_TRAILING_CHAR,

@@ -6,9 +6,15 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Union
+from typing import List, Optional, Union
 
-from ._text import check_lexical, check_windows_lexical, is_safe_component, split_components
+from ._text import (
+    check_lexical,
+    check_windows_lexical,
+    folds_to_path_syntax,
+    is_safe_component,
+    split_components,
+)
 from .errors import ErrorCode, PathCageError
 
 PathLike = Union[str, "os.PathLike[str]"]
@@ -30,6 +36,7 @@ class PathCage:
     no_symlinks: bool = True
     allow_absolute: bool = False
     _root_real: str = field(init=False, repr=False)
+    _root_alias: str = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.root = Path(self.root)
@@ -37,7 +44,8 @@ class PathCage:
             raise PathCageError(ErrorCode.MISSING_MEMBER, "cage root does not exist", str(self.root))
         if not self.root.is_dir():
             raise PathCageError(ErrorCode.NOT_A_DIRECTORY, "cage root is not a directory", str(self.root))
-        self._root_real = os.path.realpath(os.path.abspath(os.fspath(self.root)))
+        self._root_alias = os.path.abspath(os.fspath(self.root))
+        self._root_real = os.path.realpath(self._root_alias)
 
     @property
     def root_real(self) -> str:
@@ -63,6 +71,12 @@ class PathCage:
             resolved_abs = os.path.realpath(candidate_str)
             if not self.contains(resolved_abs):
                 raise PathCageError(ErrorCode.OUTSIDE_ROOT, "absolute path escapes the cage root", candidate_str)
+            if self.no_symlinks:
+                # realpath alone would silently follow a symlink that stays
+                # inside the root.  The no_symlinks contract covers absolute
+                # candidates too, so probe the chain when the candidate is
+                # expressed through the root path or its real path.
+                self._reject_symlink_chain(candidate_str, resolved_abs)
             return Path(resolved_abs)
 
         parts = list(split_components(candidate_str))
@@ -90,11 +104,41 @@ class PathCage:
             raise PathCageError(ErrorCode.OUTSIDE_ROOT, "resolved path escapes the cage root", resolved)
         return Path(resolved)
 
+    def _reject_symlink_chain(self, candidate: str, resolved: str) -> None:
+        """Reject symlinks below the root for an absolute candidate path."""
+        relative = self._relative_to_root(candidate)
+        if relative is None:
+            relative = os.path.relpath(resolved, self._root_real)
+        probe = self._root_real
+        for part in relative.split(os.sep):
+            if part in ("", "."):
+                continue
+            probe = os.path.join(probe, part)
+            if os.path.islink(probe):
+                raise PathCageError(ErrorCode.SYMLINK, "symlink components are not allowed", probe)
+
+    def _relative_to_root(self, candidate: str) -> Optional[str]:
+        """Return ``candidate`` relative to the root when it is spelled that way.
+
+        Both the caller supplied root path and its realpath are accepted so a
+        root reached through ``/tmp`` style aliases still gets probed.
+        """
+        normalized = os.path.normpath(candidate)
+        for alias in (self._root_alias, self._root_real):
+            if normalized == alias:
+                return ""
+            if normalized.startswith(alias + os.sep):
+                return os.path.relpath(normalized, alias)
+        return None
+
     def contains(self, path: PathLike) -> bool:
         """True when ``path`` (realpath-ed) is the root or lies below it."""
         resolved = os.path.realpath(os.path.abspath(os.fspath(path)))
         root = self._root_real
-        return resolved == root or resolved.startswith(root + os.sep)
+        if resolved == root:
+            return True
+        prefix = root if root.endswith(os.sep) else root + os.sep
+        return resolved.startswith(prefix)
 
     def assert_contained(self, path: PathLike) -> Path:
         """Like :meth:`resolve` but also usable on already absolute paths."""
@@ -119,8 +163,10 @@ def sanitize_filename(name: str, *, replacement: str = "_", max_length: int = 25
     """Return a conservative, single component safe filename.
 
     Separators and traversal/control/Windows constructs are replaced, not
-    merely removed, so two distinct inputs cannot silently collapse onto the
-    same name.  If the entire input is unsafe, ``"unnamed"`` is returned.
+    merely removed, so distinct hostile inputs get distinct repairs.  If the
+    entire input is unsafe, or truncation leaves a reserved or otherwise
+    unsafe name, ``"unnamed"`` is the fallback; that fallback, like the
+    ``max_length`` truncation, can collapse names that were already unusable.
     """
     if not isinstance(name, str):
         raise PathCageError(ErrorCode.EMPTY_PATH, "filename must be a string", type(name).__name__)
@@ -134,6 +180,8 @@ def sanitize_filename(name: str, *, replacement: str = "_", max_length: int = 25
         elif ch == ":":
             out.append(replacement)
         elif 0x80 <= ord(ch) <= 0x9F:
+            out.append(replacement)
+        elif folds_to_path_syntax(ch):
             out.append(replacement)
         else:
             out.append(ch)

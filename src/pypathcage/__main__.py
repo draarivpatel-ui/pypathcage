@@ -44,13 +44,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         parser.print_help()
         return 2
 
-    limits = ArchiveLimits(
-        max_files=args.max_files,
-        max_file_bytes=args.max_file_bytes,
-        max_total_bytes=args.max_total_bytes,
-        max_compression_ratio=args.max_ratio,
-    )
     try:
+        limits = ArchiveLimits(
+            max_files=args.max_files,
+            max_file_bytes=args.max_file_bytes,
+            max_total_bytes=args.max_total_bytes,
+            max_compression_ratio=args.max_ratio,
+        )
         if zipfile.is_zipfile(args.archive):
             report = inspect_zip(args.archive, limits=limits)
         elif tarfile.is_tarfile(args.archive):
@@ -59,9 +59,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             raise PathCageError(
                 ErrorCode.INVALID_ARCHIVE, "unrecognized archive format", args.archive
             )
-    except (PathCageError, OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
-        code = exc.code.value if isinstance(exc, PathCageError) else "invalid_archive"
-        print("error [{0}]: {1}".format(code, exc), file=sys.stderr)
+    except PathCageError as exc:
+        print("error [{0}]: {1}".format(exc.code.value, exc), file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        # ArchiveLimits rejects negative and non-finite values; argparse has
+        # already validated the types, so this is a usage error, not a crash.
+        print("error [usage]: {0}".format(exc), file=sys.stderr)
+        return 2
+    except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
+        print("error [invalid_archive]: {0}".format(exc), file=sys.stderr)
         return 1
 
     if args.json:
