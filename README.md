@@ -1,5 +1,7 @@
 # pypathcage
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/draarivpatel-ui/pypathcage/badge)](https://scorecard.dev/viewer/?uri=github.com/draarivpatel-ui/pypathcage)
+
 Zero-dependency path traversal, Zip-Slip, Tar-Slip (CVE-2007-4559) and decompression-bomb protection for Python 3.9+.
 
 `pypathcage` gives you small, auditable primitives that reject hostile paths and hostile archive members before they touch your filesystem. It has no runtime dependencies at all: just the Python standard library.
