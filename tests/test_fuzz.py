@@ -9,20 +9,23 @@ import tempfile
 import unittest
 import zipfile
 
+from contextlib import nullcontext
+
 try:
     import atheris
 except ImportError:
     atheris = None
 
-from pypathcage import (
-    ArchiveLimits,
-    PathCage,
-    PathCageError,
-    inspect_tar,
-    inspect_zip,
-    safe_extract_zip,
-    sanitize_filename,
-)
+with (atheris.instrument_imports(include=["pypathcage"]) if atheris is not None else nullcontext()):
+    from pypathcage import (
+        ArchiveLimits,
+        PathCage,
+        PathCageError,
+        inspect_tar,
+        inspect_zip,
+        safe_extract_zip,
+        sanitize_filename,
+    )
 
 _TOKEN_STRINGS = (
     "",
@@ -143,6 +146,9 @@ def exercise(data: bytes) -> None:
         _check_path_text(cage, "../" + text)
         _check_raw_archives(root, data)
         _check_generated_zip(root, data)
+
+
+exercise = atheris.instrument_func(exercise) if atheris is not None else exercise
 
 
 def _seed_bytes(seed: int, length: int = 96) -> bytes:
